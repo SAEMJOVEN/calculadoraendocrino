@@ -325,6 +325,8 @@ const CONVERSIONES = [
   { id: "magnesio", nombre: "Magnesio", unidConv: "mg/dL", unidSI: "mmol/L", factor: 0.4114 },
   { id: "glucosa", nombre: "Glucosa", unidConv: "mg/dL", unidSI: "mmol/L", factor: 0.0555 },
   { id: "prolactina", nombre: "Prolactina", unidConv: "ng/mL", unidSI: "mIU/L", factor: 21.2, nota: "Factor de conversión aproximado; varía según el estándar de calibración de cada inmunoensayo — confirmar con el laboratorio." },
+  { id: "reninaActividad", nombre: "Renina — actividad (ARP)", unidConv: "ng/mL/h", unidSI: "ng/(L·s)", factor: 0.2778, nota: "Conversión de unidades de tiempo/volumen (exacta); no depende del método de ensayo." },
+  { id: "reninaConcentracion", nombre: "Renina — concentración directa", unidConv: "pg/mL", unidSI: "mUI/L", factor: 1.15, nota: "Factor aproximado; la equivalencia pg/mL–mUI/L depende del estándar de calibración del ensayo (quimioluminiscencia vs. RIA) — confirmar con el laboratorio." },
 ];
 
 function ConversorTab() {
@@ -1479,6 +1481,484 @@ function MasldTab() {
 }
 
 /* ============================================================
+   MÓDULO 7 — PARÁMETROS DE OBESIDAD Y ADIPOSIDAD CENTRAL
+   ============================================================ */
+function categoriaIMC(imc) {
+  if (imc < 18.5) return { label: "Bajo peso", color: "#4A6FA5" };
+  if (imc < 25) return { label: "Normal", color: "#3F7D6E" };
+  if (imc < 30) return { label: "Sobrepeso", color: "#B4841F" };
+  if (imc < 35) return { label: "Obesidad grado I", color: "#A2483A" };
+  if (imc < 40) return { label: "Obesidad grado II", color: "#A2483A" };
+  return { label: "Obesidad grado III", color: "#A2483A" };
+}
+
+function categoriaICT(ict) {
+  if (ict < 0.5) return { label: "Riesgo bajo", color: "#3F7D6E" };
+  if (ict < 0.6) return { label: "Riesgo aumentado", color: "#B4841F" };
+  return { label: "Riesgo alto", color: "#A2483A" };
+}
+
+function categoriaICC(icc, sexo) {
+  const umbralAlto = sexo === "mujer" ? 0.85 : 1.0;
+  const umbralModerado = sexo === "mujer" ? 0.8 : 0.9;
+  if (icc < umbralModerado) return { label: "Riesgo bajo", color: "#3F7D6E" };
+  if (icc < umbralAlto) return { label: "Riesgo moderado", color: "#B4841F" };
+  return { label: "Riesgo alto", color: "#A2483A" };
+}
+
+function categoriaTGHDL(r) {
+  if (r < 2) return { label: "Óptimo", color: "#3F7D6E" };
+  if (r < 3) return { label: "Intermedio", color: "#B4841F" };
+  return { label: "Elevado — sugiere insulinorresistencia", color: "#A2483A" };
+}
+
+function categoriaVAT(area) {
+  if (area < 100) return { label: "Riesgo bajo (orientativo)", color: "#3F7D6E" };
+  if (area <= 160) return { label: "Riesgo aumentado (orientativo)", color: "#B4841F" };
+  return { label: "Riesgo alto (orientativo)", color: "#A2483A" };
+}
+
+function ResultCard({ titulo, valor, unidad, categoria }) {
+  return (
+    <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "12px", padding: "18px", textAlign: "center" }}>
+      <div className="eyebrow" style={{ marginBottom: "8px" }}>{titulo}</div>
+      <div className="num" style={{ fontSize: "28px", fontWeight: 700, color: categoria ? categoria.color : "#1C2321" }}>
+        {valor}{unidad ? <span style={{ fontSize: "14px", fontWeight: 500 }}> {unidad}</span> : null}
+      </div>
+      {categoria && (
+        <span style={{ display: "inline-block", marginTop: "8px", fontSize: "11px", fontWeight: 700, color: categoria.color, background: categoria.color + "1A", borderRadius: "5px", padding: "3px 9px" }}>
+          {categoria.label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ObesidadTab() {
+  const [form, setForm] = useState({
+    sexo: "mujer",
+    peso: 80,
+    altura: 165,
+    cintura: 95,
+    cadera: 105,
+    trigliceridos: 150,
+    glucosa: 95,
+    hdl: 45,
+  });
+  const [vatArea, setVatArea] = useState("");
+  const [agRatio, setAgRatio] = useState("");
+
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  const alturaM = (parseFloat(form.altura) || 0) / 100;
+  const imc = alturaM > 0 ? (parseFloat(form.peso) || 0) / (alturaM * alturaM) : null;
+  const ict = form.altura > 0 ? (parseFloat(form.cintura) || 0) / (parseFloat(form.altura) || 1) : null;
+  const icc = form.cadera > 0 ? (parseFloat(form.cintura) || 0) / (parseFloat(form.cadera) || 1) : null;
+  const tyg =
+    form.trigliceridos && form.glucosa
+      ? Math.log((parseFloat(form.trigliceridos) * parseFloat(form.glucosa)) / 2)
+      : null;
+  const tgHdl = form.hdl > 0 ? (parseFloat(form.trigliceridos) || 0) / (parseFloat(form.hdl) || 1) : null;
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+        <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#B4841F" }} />
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: "19px" }}>
+          Parámetros de obesidad y adiposidad central
+        </div>
+      </div>
+      <p style={{ color: "#4A544E", fontSize: "13.5px", marginBottom: "22px", maxWidth: "600px", lineHeight: 1.5 }}>
+        Antropometría, índices metabólicos derivados de laboratorio, y referencia orientativa de grasa
+        visceral por DXA.
+      </p>
+
+      {/* Formulario antropometría */}
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "16px" }}>
+        <div className="eyebrow" style={{ marginBottom: "16px" }}>Antropometría</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }} className="grid-cols-resp">
+          <Field label="Sexo biológico">
+            <select value={form.sexo} onChange={set("sexo")} style={selectStyle}>
+              <option value="mujer">Mujer</option>
+              <option value="hombre">Hombre</option>
+            </select>
+          </Field>
+          <Field label="Peso (kg)">
+            <input type="number" value={form.peso} onChange={set("peso")} style={inputStyle} />
+          </Field>
+          <Field label="Altura (cm)">
+            <input type="number" value={form.altura} onChange={set("altura")} style={inputStyle} />
+          </Field>
+          <Field label="Circunferencia de cintura (cm)">
+            <input type="number" value={form.cintura} onChange={set("cintura")} style={inputStyle} />
+          </Field>
+          <Field label="Circunferencia de cadera (cm)">
+            <input type="number" value={form.cadera} onChange={set("cadera")} style={inputStyle} />
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "24px" }} className="grid-cols-resp">
+        <ResultCard titulo="IMC" valor={imc ? imc.toFixed(1) : "—"} unidad="kg/m²" categoria={imc ? categoriaIMC(imc) : null} />
+        <ResultCard titulo="Índice cintura/talla" valor={ict ? ict.toFixed(2) : "—"} categoria={ict ? categoriaICT(ict) : null} />
+        <ResultCard titulo="Índice cintura/cadera" valor={icc ? icc.toFixed(2) : "—"} categoria={icc ? categoriaICC(icc, form.sexo) : null} />
+      </div>
+
+      {/* Formulario índices metabólicos */}
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "16px" }}>
+        <div className="eyebrow" style={{ marginBottom: "16px" }}>Índices metabólicos (laboratorio en ayunas)</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px" }} className="grid-cols-resp">
+          <Field label="Triglicéridos (mg/dL)">
+            <input type="number" value={form.trigliceridos} onChange={set("trigliceridos")} style={inputStyle} />
+          </Field>
+          <Field label="Glucosa (mg/dL)">
+            <input type="number" value={form.glucosa} onChange={set("glucosa")} style={inputStyle} />
+          </Field>
+          <Field label="HDL (mg/dL)">
+            <input type="number" value={form.hdl} onChange={set("hdl")} style={inputStyle} />
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "10px" }} className="grid-cols-resp">
+        <ResultCard titulo="Índice TyG" valor={tyg ? tyg.toFixed(2) : "—"} categoria={null} />
+        <ResultCard titulo="TG / HDL" valor={tgHdl ? tgHdl.toFixed(2) : "—"} categoria={tgHdl ? categoriaTGHDL(tgHdl) : null} />
+      </div>
+      <div style={{ fontSize: "12px", color: "#6B7A72", marginBottom: "24px", lineHeight: 1.5 }}>
+        <strong style={{ color: "#4A544E" }}>Sobre el índice TyG:</strong> fórmula Ln[triglicéridos(mg/dL) × glucosa(mg/dL) / 2]. No tiene un punto de corte único validado — distintos estudios reportan umbrales de insulinorresistencia entre 8.3 y 9.0 según la población. Se muestra el valor sin categorizar por esa razón; interpretalo en conjunto con el cuadro clínico.
+      </div>
+
+      {/* DXA */}
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "16px" }}>
+        <div className="eyebrow" style={{ marginBottom: "16px" }}>DXA — grasa visceral y adiposidad central (referencia orientativa)</div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "18px" }} className="grid-cols-resp">
+          <Field label="Área de grasa visceral — VAT (cm²)">
+            <input type="number" placeholder="ej: 120" value={vatArea} onChange={(e) => setVatArea(e.target.value)} style={inputStyle} />
+          </Field>
+          <Field label="Relación androide/ginoide (A/G)">
+            <input type="number" step="0.01" placeholder="ej: 1.05" value={agRatio} onChange={(e) => setAgRatio(e.target.value)} style={inputStyle} />
+          </Field>
+        </div>
+
+        {vatArea !== "" && (
+          <div style={{ marginBottom: "14px" }}>
+            <ResultCard titulo="Interpretación VAT" valor={parseFloat(vatArea).toFixed(0)} unidad="cm²" categoria={categoriaVAT(parseFloat(vatArea))} />
+          </div>
+        )}
+        {agRatio !== "" && (
+          <div style={{ fontSize: "13px", color: "#3A423E", background: "#FAF9F5", border: "1px solid #E4E1D6", borderRadius: "10px", padding: "12px 14px", marginBottom: "14px" }}>
+            Relación A/G = <strong className="num">{parseFloat(agRatio).toFixed(2)}</strong>.{" "}
+            {parseFloat(agRatio) >= 1.0
+              ? "Valores ≥1.0 sugieren un patrón de distribución de grasa androide/central, asociado a mayor riesgo cardiometabólico."
+              : "Valor por debajo de 1.0 — patrón de distribución más ginoide (periférico)."}{" "}
+            No existe un punto de corte único estandarizado entre fabricantes de DXA.
+          </div>
+        )}
+
+        <div style={{ marginTop: "8px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #E4E1D6" }}>
+                <th style={{ textAlign: "left", padding: "8px 6px", color: "#6B7A72", fontWeight: 600 }}>Parámetro DXA</th>
+                <th style={{ textAlign: "left", padding: "8px 6px", color: "#6B7A72", fontWeight: 600 }}>Referencia orientativa</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                ["Área de VAT", "< 100 cm² riesgo bajo · 100–160 cm² riesgo aumentado · > 160 cm² riesgo alto (rangos de distintos estudios de validación, no un corte único)"],
+                ["Masa de VAT", "Sin corte universal — depende del software (Hologic APEX / GE CoreScan) y la población; usar siempre el rango de referencia propio del equipo/informe"],
+                ["Relación A/G (androide/ginoide)", "Sin corte único estandarizado; valores más altos (aprox. ≥1.0) se asocian a mayor riesgo cardiometabólico, sobre todo en mujeres posmenopáusicas"],
+                ["% grasa corporal total — hombres", "Esencial 2–5% · Atlético 6–13% · Fitness 14–17% · Promedio 18–24% · Obesidad ≥25%"],
+                ["% grasa corporal total — mujeres", "Esencial 10–13% · Atlético 14–20% · Fitness 21–24% · Promedio 25–31% · Obesidad ≥32%"],
+              ].map((row, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid #F0EEE6" }}>
+                  <td style={{ padding: "9px 6px", fontWeight: 600 }}>{row[0]}</td>
+                  <td style={{ padding: "9px 6px", color: "#4A544E" }}>{row[1]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Disclaimer texto="Los valores de grasa visceral (VAT) por DXA dependen del equipo, el software (Hologic APEX/CoreScan, GE Lunar) y la población de referencia usada para calibrarlo — no existe un punto de corte único aceptado universalmente, a diferencia de lo que ocurre con el IMC. Priorizá siempre el rango de referencia que trae el informe de tu propio equipo. Los índices cintura/talla y cintura/cadera son complementarios al IMC, no sustitutos, especialmente útiles para detectar riesgo cardiometabólico en personas con IMC normal (obesidad de peso normal)." />
+    </div>
+  );
+}
+/* ============================================================
+   MÓDULO 9 — NÓDULO TIROIDEO: TI-RADS (ACR 2017) Y PATRONES ATA (2015)
+   ============================================================ */
+const TIRADS_CATEGORIAS = {
+  composicion: {
+    label: "Composición",
+    opciones: [
+      { label: "Quístico o casi completamente quístico", pts: 0 },
+      { label: "Espongiforme", pts: 0 },
+      { label: "Mixto quístico y sólido", pts: 1 },
+      { label: "Sólido o casi completamente sólido", pts: 2 },
+      { label: "No se puede determinar", pts: 2 },
+    ],
+  },
+  ecogenicidad: {
+    label: "Ecogenicidad",
+    opciones: [
+      { label: "Anecoico", pts: 0 },
+      { label: "Hiperecoico o isoecoico", pts: 1 },
+      { label: "Hipoecoico", pts: 2 },
+      { label: "Muy hipoecoico", pts: 3 },
+      { label: "No se puede determinar", pts: 1 },
+    ],
+  },
+  forma: {
+    label: "Forma",
+    opciones: [
+      { label: "Más ancho que alto", pts: 0 },
+      { label: "Más alto que ancho", pts: 3 },
+    ],
+  },
+  margen: {
+    label: "Márgenes",
+    opciones: [
+      { label: "Liso", pts: 0 },
+      { label: "Mal definido", pts: 0 },
+      { label: "Lobulado o irregular", pts: 2 },
+      { label: "Extensión extratiroidea", pts: 3 },
+    ],
+  },
+};
+
+const TIRADS_FOCOS = [
+  { label: "Ninguno, o artefactos en cola de cometa grandes", pts: 0 },
+  { label: "Macrocalcificaciones", pts: 1 },
+  { label: "Calcificaciones periféricas (en anillo)", pts: 2 },
+  { label: "Focos ecogénicos puntiformes", pts: 3 },
+];
+
+function categoriaTIRADS(total) {
+  if (total === 0) return { nivel: "TR1", label: "Benigno", color: "#3F7D6E", umbralPAAF: null, umbralSeguimiento: null };
+  if (total === 2) return { nivel: "TR2", label: "No sospechoso", color: "#3F7D6E", umbralPAAF: null, umbralSeguimiento: null };
+  if (total === 3) return { nivel: "TR3", label: "Levemente sospechoso", color: "#B4841F", umbralPAAF: 2.5, umbralSeguimiento: 1.5 };
+  if (total >= 4 && total <= 6) return { nivel: "TR4", label: "Moderadamente sospechoso", color: "#B4841F", umbralPAAF: 1.5, umbralSeguimiento: 1.0 };
+  return { nivel: "TR5", label: "Altamente sospechoso", color: "#A2483A", umbralPAAF: 1.0, umbralSeguimiento: 0.5 };
+}
+
+function recomendacionPorUmbral(tamanioCm, umbralPAAF, umbralSeguimiento) {
+  if (umbralPAAF == null) return "No se recomienda PAAF por tamaño en esta categoría.";
+  if (tamanioCm >= umbralPAAF) return `PAAF recomendada (nódulo ≥ ${umbralPAAF} cm).`;
+  if (umbralSeguimiento != null && tamanioCm >= umbralSeguimiento) return `No requiere PAAF; seguimiento ecográfico (nódulo ≥ ${umbralSeguimiento} cm, < ${umbralPAAF} cm).`;
+  return "No requiere PAAF ni seguimiento activo por tamaño.";
+}
+
+function TiradsCalculadora() {
+  const [sel, setSel] = useState({ composicion: 0, ecogenicidad: 0, forma: 0, margen: 0 });
+  const [focos, setFocos] = useState([0]);
+  const [tamanio, setTamanio] = useState(1.2);
+
+  const toggleFoco = (idx) => {
+    if (idx === 0) { setFocos([0]); return; }
+    setFocos((prev) => {
+      const sinNinguno = prev.filter((i) => i !== 0);
+      return sinNinguno.includes(idx) ? sinNinguno.filter((i) => i !== idx) : [...sinNinguno, idx];
+    });
+  };
+
+  const totalPts = useMemo(() => {
+    let t = 0;
+    Object.keys(sel).forEach((cat) => {
+      t += TIRADS_CATEGORIAS[cat].opciones[sel[cat]].pts;
+    });
+    focos.forEach((idx) => { t += TIRADS_FOCOS[idx].pts; });
+    return t;
+  }, [sel, focos]);
+
+  const cat = categoriaTIRADS(totalPts);
+  const recomendacion = recomendacionPorUmbral(parseFloat(tamanio) || 0, cat.umbralPAAF, cat.umbralSeguimiento);
+
+  return (
+    <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "20px" }}>
+      <div className="eyebrow" style={{ marginBottom: "16px" }}>ACR TI-RADS (2017) — sistema de puntaje</div>
+
+      {Object.keys(TIRADS_CATEGORIAS).map((cat_key) => (
+        <div key={cat_key} style={{ marginBottom: "16px" }}>
+          <Field label={TIRADS_CATEGORIAS[cat_key].label}>
+            <select
+              value={sel[cat_key]}
+              onChange={(e) => setSel({ ...sel, [cat_key]: parseInt(e.target.value) })}
+              style={selectStyle}
+            >
+              {TIRADS_CATEGORIAS[cat_key].opciones.map((op, i) => (
+                <option key={i} value={i}>{op.label} (+{op.pts})</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      ))}
+
+      <div style={{ marginBottom: "16px" }}>
+        <label className="eyebrow" style={{ display: "block", marginBottom: "8px" }}>
+          Focos ecogénicos (marcar todos los que apliquen)
+        </label>
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          {TIRADS_FOCOS.map((f, i) => (
+            <label key={i} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#3A423E", cursor: "pointer" }}>
+              <input type="checkbox" checked={focos.includes(i)} onChange={() => toggleFoco(i)} />
+              {f.label} (+{f.pts})
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <Field label="Tamaño del nódulo (diámetro mayor, cm)">
+        <input type="number" step="0.1" value={tamanio} onChange={(e) => setTamanio(e.target.value)} style={inputStyle} />
+      </Field>
+
+      <div style={{ textAlign: "center", padding: "20px 0", marginTop: "16px", borderTop: "1px solid #F0EEE6" }}>
+        <div className="eyebrow" style={{ marginBottom: "8px" }}>Puntaje total: {totalPts}</div>
+        <div className="num" style={{ fontSize: "34px", fontWeight: 700, color: cat.color }}>{cat.nivel}</div>
+        <div style={{ marginTop: "6px" }}>
+          <span style={{ fontSize: "12px", fontWeight: 700, color: cat.color, background: cat.color + "1A", borderRadius: "5px", padding: "3px 10px" }}>
+            {cat.label}
+          </span>
+        </div>
+        <div style={{ fontSize: "13.5px", color: "#3A423E", maxWidth: "420px", margin: "12px auto 0", fontWeight: 600 }}>
+          {recomendacion}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ATA_PATRONES = [
+  {
+    id: "alta",
+    label: "Alta sospecha",
+    riesgo: "70–90%",
+    color: "#A2483A",
+    umbralPAAF: 1.0,
+    descripcion: "Nódulo sólido hipoecoico (o componente sólido hipoecoico de un nódulo parcialmente quístico) con ≥1 de: márgenes irregulares, microcalcificaciones, forma más alta que ancha, calcificaciones periféricas con extrusión de tejido blando, extensión extratiroidea.",
+  },
+  {
+    id: "intermedia",
+    label: "Sospecha intermedia",
+    riesgo: "10–20%",
+    color: "#B4841F",
+    umbralPAAF: 1.0,
+    descripcion: "Nódulo sólido hipoecoico de márgenes lisos, sin microcalcificaciones, extensión extratiroidea ni forma más alta que ancha.",
+  },
+  {
+    id: "baja",
+    label: "Baja sospecha",
+    riesgo: "5–10%",
+    color: "#B4841F",
+    umbralPAAF: 1.5,
+    descripcion: "Nódulo sólido isoecoico o hiperecoico, o parcialmente quístico con áreas sólidas excéntricas, sin microcalcificaciones, márgenes irregulares, extensión extratiroidea ni forma más alta que ancha.",
+  },
+  {
+    id: "muybaja",
+    label: "Muy baja sospecha",
+    riesgo: "< 3%",
+    color: "#3F7D6E",
+    umbralPAAF: 2.0,
+    descripcion: "Nódulo espongiforme o parcialmente quístico, sin ninguna de las características sonográficas de los patrones anteriores.",
+  },
+  {
+    id: "benigno",
+    label: "Benigno",
+    riesgo: "< 1%",
+    color: "#3F7D6E",
+    umbralPAAF: null,
+    descripcion: "Nódulo puramente quístico, sin componente sólido.",
+  },
+];
+
+function AtaCalculadora() {
+  const [patronId, setPatronId] = useState("intermedia");
+  const [tamanio, setTamanio] = useState(1.2);
+  const patron = ATA_PATRONES.find((p) => p.id === patronId);
+  const tamanioNum = parseFloat(tamanio) || 0;
+
+  let recomendacion;
+  if (patron.umbralPAAF == null) recomendacion = "No se recomienda PAAF — patrón benigno.";
+  else if (tamanioNum >= patron.umbralPAAF) recomendacion = `PAAF recomendada (nódulo ≥ ${patron.umbralPAAF} cm).`;
+  else recomendacion = patron.id === "muybaja" ? "Considerar observación sin PAAF, o seguimiento ecográfico." : "No requiere PAAF por tamaño; seguimiento ecográfico.";
+
+  return (
+    <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "20px" }}>
+      <div className="eyebrow" style={{ marginBottom: "16px" }}>Patrones ecográficos ATA (2015)</div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "18px" }}>
+        {ATA_PATRONES.map((p) => (
+          <label
+            key={p.id}
+            style={{
+              display: "flex",
+              gap: "10px",
+              padding: "12px 14px",
+              borderRadius: "10px",
+              border: `1px solid ${patronId === p.id ? p.color : "#E4E1D6"}`,
+              background: patronId === p.id ? p.color + "0D" : "#FAF9F5",
+              cursor: "pointer",
+            }}
+          >
+            <input type="radio" name="ata" checked={patronId === p.id} onChange={() => setPatronId(p.id)} style={{ marginTop: "3px" }} />
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontWeight: 700, fontSize: "13.5px" }}>{p.label}</span>
+                <span className="num" style={{ fontSize: "11px", fontWeight: 700, color: p.color, background: p.color + "1A", borderRadius: "4px", padding: "2px 7px" }}>
+                  {p.riesgo}
+                </span>
+              </div>
+              <div style={{ fontSize: "12px", color: "#4A544E", marginTop: "3px", lineHeight: 1.45 }}>{p.descripcion}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+
+      <Field label="Tamaño del nódulo (diámetro mayor, cm)">
+        <input type="number" step="0.1" value={tamanio} onChange={(e) => setTamanio(e.target.value)} style={inputStyle} />
+      </Field>
+
+      <div style={{ textAlign: "center", padding: "20px 0", marginTop: "16px", borderTop: "1px solid #F0EEE6" }}>
+        <div className="eyebrow" style={{ marginBottom: "8px" }}>Patrón seleccionado</div>
+        <div className="num" style={{ fontSize: "24px", fontWeight: 700, color: patron.color }}>{patron.label}</div>
+        <div style={{ fontSize: "13.5px", color: "#3A423E", maxWidth: "420px", margin: "10px auto 0", fontWeight: 600 }}>
+          {recomendacion}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NoduloTab() {
+  const [modo, setModo] = useState("tirads");
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+        <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#B4841F" }} />
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: "19px" }}>
+          Riesgo de malignidad de nódulo tiroideo
+        </div>
+      </div>
+      <p style={{ color: "#4A544E", fontSize: "13.5px", marginBottom: "18px", maxWidth: "600px", lineHeight: 1.5 }}>
+        Dos sistemas de estratificación ecográfica en uso simultáneo — elegí el que use el informe
+        radiológico que tenés delante.
+      </p>
+
+      <div className="chips-scroll" style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
+        <div className={`chip ${modo === "tirads" ? "active" : ""}`} onClick={() => setModo("tirads")}>ACR TI-RADS (2017)</div>
+        <div className={`chip ${modo === "ata" ? "active" : ""}`} onClick={() => setModo("ata")}>Patrones ATA (2015)</div>
+      </div>
+
+      {modo === "tirads" ? <TiradsCalculadora /> : <AtaCalculadora />}
+
+      <Disclaimer texto="TI-RADS y ATA son sistemas de estratificación ecográfica concordantes en la mayoría de los casos, pero no idénticos — usá el que corresponda al informe que tenés, y priorizá siempre la descripción del operador que realizó la ecografía por sobre esta herramienta. Ninguno de los dos sistemas diagnostica malignidad: solo estratifican el riesgo para decidir si está indicada la PAAF. El resultado citológico (sistema Bethesda) sigue siendo el paso siguiente para la conducta definitiva." />
+    </div>
+  );
+}
+
+/* ============================================================
    COMPONENTES COMUNES
    ============================================================ */
 function Disclaimer({ texto }) {
@@ -1493,12 +1973,14 @@ function Disclaimer({ texto }) {
    APP PRINCIPAL
    ============================================================ */
 const TABS = [
+  { id: "obesidad", label: "Parámetros metabólicos" },
+  { id: "nodulo", label: "Nódulo tiroideo (TI-RADS/ATA)" },
+  { id: "prevent", label: "Riesgo CV (PREVENT)" },
+  { id: "masld", label: "MASLD (FIB-4)" },
   { id: "corticoides", label: "Equivalencias de corticoides" },
   { id: "referencia", label: "Valores de referencia" },
   { id: "conversor", label: "Conversor de unidades" },
   { id: "algoritmos", label: "Algoritmos terapéuticos" },
-  { id: "prevent", label: "Riesgo CV (PREVENT)" },
-  { id: "masld", label: "MASLD (FIB-4)" },
 ];
 
 function App() {
@@ -1532,6 +2014,8 @@ function App() {
         {tab === "algoritmos" && <AlgoritmosTab />}
         {tab === "prevent" && <PreventTab />}
         {tab === "masld" && <MasldTab />}
+        {tab === "obesidad" && <ObesidadTab />}
+        {tab === "nodulo" && <NoduloTab />}
       </div>
     </div>
   );
