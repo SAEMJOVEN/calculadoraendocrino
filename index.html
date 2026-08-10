@@ -1,22 +1,4 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Toolkit de Endocrinología</title>
-<link rel="icon" href="data:,">
-<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-<style>
-  html, body { margin: 0; padding: 0; background: #F5F4F0; }
-  #root { min-height: 100vh; }
-</style>
-</head>
-<body>
-<div id="root"></div>
-<script type="text/babel" data-presets="react">
-const { useState, useMemo } = React;
+import React, { useState, useMemo } from "react";
 
 /* ============================================================
    ESTILOS COMPARTIDOS
@@ -1930,9 +1912,544 @@ function AtaCalculadora() {
   );
 }
 
+/* ============================================================
+   ATA 2025 — RIESGO DE RECURRENCIA (reconstrucción a partir de fuentes
+   publicadas: Ringel MD, et al. Thyroid 2025;35(8):841-985, y resúmenes
+   de Clinical Thyroidology / revisiones especializadas. No es el motor
+   de decisión original de ninguna calculadora comercial — ver disclaimer.
+   ============================================================ */
+function clasificarATA2025(f) {
+  const bajoIntermedio = [];
+  const intermedioAlto = [];
+  const alto = [];
+
+  const esFolicular = f.histologia === "ftc" || f.histologia === "otc";
+  const etiquetaHist = f.histologia === "ftc" ? "FTC/IEFVPTC" : f.histologia === "otc" ? "oncocítico (OTC)" : "PTC";
+
+  // Extensión extratiroidea
+  if (f.ete === "micro") bajoIntermedio.push("Extensión extratiroidea microscópica (pETE)");
+  if (f.ete === "macroLimitada") intermedioAlto.push("Extensión extratiroidea macroscópica limitada a músculos pretiroideos");
+  if (f.ete === "macroMayor") alto.push("Extensión extratiroidea macroscópica mayor (más allá de músculos pretiroideos)");
+
+  // Subtipo histológico agresivo / alto grado
+  if (f.subtipoAgresivo === "si") intermedioAlto.push("Subtipo histológico agresivo (célula alta, hobnail, columnar, esclerosante difuso)");
+  if (f.altoGrado === "si") alto.push("Alto grado / pobremente diferenciado");
+
+  // Invasión vascular
+  if (!esFolicular && f.vascularPTC === "presente") bajoIntermedio.push("Invasión vascular presente (PTC)");
+  if (esFolicular && f.vascularFTC === "limitada") bajoIntermedio.push(`Invasión vascular limitada (< 4 focos, ${etiquetaHist})`);
+  if (esFolicular && f.vascularFTC === "extensa") alto.push(`Invasión vascular extensa (≥ 4 focos, ${etiquetaHist})`);
+
+  // Invasión capsular (relevante en FTC/OTC)
+  if (esFolicular && f.invasionCapsular === "amplia") intermedioAlto.push(`Invasión ampliamente invasiva (${etiquetaHist})`);
+
+  // Resección
+  if (f.reseccion === "incompleta") alto.push("Resección incompleta (R2 / residuo macroscópico)");
+
+  // Focalidad
+  if (f.focalidad === "unilateral" || f.focalidad === "bilateral") bajoIntermedio.push("Enfermedad multifocal");
+
+  // Márgenes
+  if (f.margenPositivo === "si") {
+    if (f.margenAnterior === "microscopico" || f.margenPosterior === "microscopico") {
+      bajoIntermedio.push("Margen quirúrgico microscópicamente positivo (R1)");
+    }
+    if (f.margenAnterior === "grueso" || f.margenPosterior === "grueso") {
+      alto.push("Margen quirúrgico groseramente positivo");
+    }
+  }
+
+  // Ganglios centrales
+  if (f.centralPositivos === "si") {
+    if (f.centralNumero === "pocos" && f.centralTamanio === "micro") {
+      // N0/Nx equivalente — ≤5 nodos, todos <2mm: no agrega riesgo (bajo)
+    } else if (f.centralNumero === "muchos" && f.centralTamanio !== "grande") {
+      bajoIntermedio.push("N1a central, > 5 ganglios, volumen pequeño (< 3 cm)");
+    } else if (f.centralTamanio === "grande") {
+      intermedioAlto.push("N1a central con ganglios de gran tamaño (≥ 3 cm)");
+    } else {
+      bajoIntermedio.push("N1a central de bajo volumen");
+    }
+  }
+
+  // Ganglios laterales
+  if (f.lateralPositivos === "si") {
+    if (f.lateralTamanio === "grande") alto.push("N1b lateral con ganglio ≥ 3 cm");
+    else intermedioAlto.push("N1b — metástasis en compartimento lateral");
+  }
+
+  // Extensión extranodal
+  if (f.ene === "si") alto.push("Extensión extranodal (ENE) presente");
+
+  // Metástasis a distancia
+  if (f.m1 === "si") alto.push("Metástasis a distancia (M1)");
+
+  // Tamaño tumoral > 4cm confinado, sin otros factores adversos
+  const tam = parseFloat(f.tamanio) || 0;
+  if (tam > 4 && f.ete === "ninguna" && bajoIntermedio.length === 0 && intermedioAlto.length === 0 && alto.length === 0) {
+    bajoIntermedio.push("Tumor > 4 cm confinado a la tiroides, sin otros factores adversos");
+  }
+
+  // Determinación final
+  let categoria;
+  if (alto.length > 0) categoria = "alto";
+  else if (intermedioAlto.length > 0) categoria = "intermedioAlto";
+  else if (bajoIntermedio.length >= 2) categoria = "intermedioAlto"; // regla aditiva
+  else if (bajoIntermedio.length === 1) categoria = "bajoIntermedio";
+  else categoria = "bajo";
+
+  const META = {
+    bajo: { label: "Bajo riesgo", color: "#3F7D6E", riesgo: "< 5%" },
+    bajoIntermedio: { label: "Bajo-intermedio", color: "#7A9B6E", riesgo: "5–15% (orientativo)" },
+    intermedioAlto: { label: "Intermedio-alto", color: "#B4841F", riesgo: "15–30% (orientativo)" },
+    alto: { label: "Alto riesgo", color: "#A2483A", riesgo: "≥ 30%" },
+  };
+
+  return { categoria, meta: META[categoria], factores: { bajoIntermedio, intermedioAlto, alto } };
+}
+
+function Ata2025Calculadora() {
+  const [f, setF] = useState({
+    histologia: "ptc",
+    tamanio: 1.5,
+    ete: "ninguna",
+    subtipoAgresivo: "no",
+    altoGrado: "no",
+    vascularPTC: "ausente",
+    vascularFTC: "ninguna",
+    invasionCapsular: "ninguna",
+    reseccion: "completa",
+    focalidad: "unifocal",
+    margenPositivo: "no",
+    margenAnterior: "negativo",
+    margenPosterior: "negativo",
+    centralPositivos: "no",
+    centralNumero: "pocos",
+    centralTamanio: "micro",
+    lateralPositivos: "no",
+    lateralTamanio: "chico",
+    ene: "no",
+    m1: "no",
+  });
+
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const resultado = useMemo(() => clasificarATA2025(f), [f]);
+  const esFolicular = f.histologia === "ftc" || f.histologia === "otc";
+
+  return (
+    <div>
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "16px" }}>
+        <div className="eyebrow" style={{ marginBottom: "16px" }}>1 · Histología y tamaño</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }} className="grid-cols-resp">
+          <Field label="Histología">
+            <select value={f.histologia} onChange={set("histologia")} style={selectStyle}>
+              <option value="ptc">PTC</option>
+              <option value="ftc">FTC / IEFVPTC</option>
+              <option value="otc">Oncocítico (OTC)</option>
+            </select>
+          </Field>
+          <Field label="Tamaño tumoral (cm)">
+            <input type="number" step="0.1" value={f.tamanio} onChange={set("tamanio")} style={inputStyle} />
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "16px" }}>
+        <div className="eyebrow" style={{ marginBottom: "16px" }}>2 · Características del tumor</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }} className="grid-cols-resp">
+          <Field label="Extensión extratiroidea (ETE)">
+            <select value={f.ete} onChange={set("ete")} style={selectStyle}>
+              <option value="ninguna">Ninguna</option>
+              <option value="micro">Microscópica</option>
+              <option value="macroLimitada">Macroscópica, limitada a músculos pretiroideos</option>
+              <option value="macroMayor">Macroscópica mayor</option>
+            </select>
+          </Field>
+          <Field label="Subtipo histológico agresivo">
+            <select value={f.subtipoAgresivo} onChange={set("subtipoAgresivo")} style={selectStyle}>
+              <option value="no">No</option>
+              <option value="si">Sí (célula alta, hobnail, columnar, esclerosante difuso)</option>
+            </select>
+          </Field>
+          <Field label="Alto grado / pobremente diferenciado">
+            <select value={f.altoGrado} onChange={set("altoGrado")} style={selectStyle}>
+              <option value="no">No</option>
+              <option value="si">Sí</option>
+            </select>
+          </Field>
+          {!esFolicular ? (
+            <Field label="Invasión vascular (PTC)">
+              <select value={f.vascularPTC} onChange={set("vascularPTC")} style={selectStyle}>
+                <option value="ausente">Ausente</option>
+                <option value="presente">Presente</option>
+              </select>
+            </Field>
+          ) : (
+            <>
+              <Field label={`Invasión vascular (${f.histologia === "ftc" ? "FTC/IEFVPTC" : "OTC"})`}>
+                <select value={f.vascularFTC} onChange={set("vascularFTC")} style={selectStyle}>
+                  <option value="ninguna">Ninguna</option>
+                  <option value="limitada">Limitada (&lt; 4 focos)</option>
+                  <option value="extensa">Extensa (≥ 4 focos)</option>
+                </select>
+              </Field>
+              <Field label="Invasión capsular/tumoral">
+                <select value={f.invasionCapsular} onChange={set("invasionCapsular")} style={selectStyle}>
+                  <option value="ninguna">Ninguna</option>
+                  <option value="minima">Mínimamente invasivo (solo capsular)</option>
+                  <option value="amplia">Ampliamente invasivo</option>
+                </select>
+              </Field>
+            </>
+          )}
+          <Field label="Estado de la resección">
+            <select value={f.reseccion} onChange={set("reseccion")} style={selectStyle}>
+              <option value="completa">Completa (R0/R1)</option>
+              <option value="incompleta">Incompleta (R2/residuo macroscópico)</option>
+            </select>
+          </Field>
+          <Field label="Focalidad">
+            <select value={f.focalidad} onChange={set("focalidad")} style={selectStyle}>
+              <option value="unifocal">Unifocal</option>
+              <option value="unilateral">Multifocal unilateral</option>
+              <option value="bilateral">Multifocal bilateral &gt; 1 cm</option>
+            </select>
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "16px" }}>
+        <div className="eyebrow" style={{ marginBottom: "16px" }}>3 · Márgenes y ganglios</div>
+
+        <Field label="¿Margen quirúrgico positivo?">
+          <select value={f.margenPositivo} onChange={set("margenPositivo")} style={selectStyle}>
+            <option value="no">No (negativo)</option>
+            <option value="si">Sí</option>
+          </select>
+        </Field>
+
+        {f.margenPositivo === "si" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "14px" }} className="grid-cols-resp">
+            <Field label="Margen anterior">
+              <select value={f.margenAnterior} onChange={set("margenAnterior")} style={selectStyle}>
+                <option value="negativo">Negativo</option>
+                <option value="microscopico">Microscópico (+)</option>
+                <option value="grueso">Grueso (+)</option>
+              </select>
+            </Field>
+            <Field label="Margen posterior">
+              <select value={f.margenPosterior} onChange={set("margenPosterior")} style={selectStyle}>
+                <option value="negativo">Negativo</option>
+                <option value="microscopico">Microscópico (+)</option>
+                <option value="grueso">Grueso (+)</option>
+              </select>
+            </Field>
+          </div>
+        )}
+
+        <div style={{ borderTop: "1px solid #F0EEE6", marginTop: "18px", paddingTop: "16px" }}>
+          <Field label="Ganglios centrales (nivel VI/VII) — ¿positivos?">
+            <select value={f.centralPositivos} onChange={set("centralPositivos")} style={selectStyle}>
+              <option value="no">Sin participación</option>
+              <option value="si">Nodos positivos presentes</option>
+            </select>
+          </Field>
+          {f.centralPositivos === "si" && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "14px" }} className="grid-cols-resp">
+              <Field label="Número de nodos">
+                <select value={f.centralNumero} onChange={set("centralNumero")} style={selectStyle}>
+                  <option value="pocos">≤ 5 nodos</option>
+                  <option value="muchos">&gt; 5 nodos</option>
+                </select>
+              </Field>
+              <Field label="Tamaño máximo del nodo">
+                <select value={f.centralTamanio} onChange={set("centralTamanio")} style={selectStyle}>
+                  <option value="micro">≤ 2 mm</option>
+                  <option value="mediano">&gt; 2 mm y &lt; 3 cm</option>
+                  <option value="grande">≥ 3 cm</option>
+                </select>
+              </Field>
+            </div>
+          )}
+        </div>
+
+        <div style={{ borderTop: "1px solid #F0EEE6", marginTop: "18px", paddingTop: "16px" }}>
+          <Field label="Ganglios laterales (niveles II-V) — ¿positivos?">
+            <select value={f.lateralPositivos} onChange={set("lateralPositivos")} style={selectStyle}>
+              <option value="no">Sin participación</option>
+              <option value="si">Nodos positivos presentes</option>
+            </select>
+          </Field>
+          {f.lateralPositivos === "si" && (
+            <div style={{ marginTop: "14px" }}>
+              <Field label="Tamaño máximo del nodo">
+                <select value={f.lateralTamanio} onChange={set("lateralTamanio")} style={selectStyle}>
+                  <option value="chico">&lt; 3 cm</option>
+                  <option value="grande">≥ 3 cm</option>
+                </select>
+              </Field>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #F0EEE6" }} className="grid-cols-resp">
+          <Field label="Extensión extranodal (ENE)">
+            <select value={f.ene} onChange={set("ene")} style={selectStyle}>
+              <option value="no">Ausente</option>
+              <option value="si">Presente</option>
+            </select>
+          </Field>
+          <Field label="Metástasis a distancia (M1)">
+            <select value={f.m1} onChange={set("m1")} style={selectStyle}>
+              <option value="no">No</option>
+              <option value="si">Sí</option>
+            </select>
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "26px 24px", marginBottom: "16px", textAlign: "center" }}>
+        <div className="eyebrow" style={{ marginBottom: "10px" }}>Categoría de riesgo de recurrencia — ATA 2025</div>
+        <div className="num" style={{ fontSize: "32px", fontWeight: 700, color: resultado.meta.color }}>{resultado.meta.label}</div>
+        <div style={{ marginTop: "6px" }}>
+          <span className="num" style={{ fontSize: "12px", fontWeight: 700, color: resultado.meta.color, background: resultado.meta.color + "1A", borderRadius: "5px", padding: "3px 10px" }}>
+            Riesgo estimado {resultado.meta.riesgo}
+          </span>
+        </div>
+
+        {["alto", "intermedioAlto", "bajoIntermedio"].map((k) =>
+          resultado.factores[k].length > 0 ? (
+            <div key={k} style={{ textAlign: "left", maxWidth: "460px", margin: "14px auto 0" }}>
+              <div className="eyebrow" style={{ marginBottom: "6px" }}>
+                {k === "alto" ? "Factores de alto riesgo" : k === "intermedioAlto" ? "Factores intermedio-alto" : "Factores bajo-intermedio"}
+              </div>
+              <ul style={{ margin: 0, paddingLeft: "18px" }}>
+                {resultado.factores[k].map((t, i) => (
+                  <li key={i} style={{ fontSize: "12.5px", color: "#3A423E", marginBottom: "3px" }}>{t}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null
+        )}
+      </div>
+
+      <a
+        href="https://tiro.expert/es/ata-2025-risk-of-recurrence-calculator/"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display: "block",
+          textAlign: "center",
+          background: "#1C2321",
+          color: "#F5F4F0",
+          borderRadius: "10px",
+          padding: "13px",
+          fontWeight: 600,
+          fontSize: "14px",
+          textDecoration: "none",
+          marginBottom: "16px",
+        }}
+      >
+        Contrastar con la calculadora oficial de TIRO ↗
+      </a>
+
+      <Disclaimer texto="Este clasificador es una reconstrucción propia a partir de fuentes publicadas sobre la guía ATA 2025 (Ringel MD, et al. Thyroid 2025;35(8):841-985, y resúmenes de revisión especializados) — no es el motor de decisión original de TIRO ni de ningún otro sitio, y puede no capturar cada regla combinatoria exacta de la guía oficial (que incluye matices adicionales, especialmente en la estadificación ganglionar y las reglas aditivas). Usalo como apoyo de estudio y orientación rápida, y contrastá siempre los casos límite o de alto impacto terapéutico (indicación de yodo radioactivo) con la calculadora oficial o el texto completo de la guía." />
+    </div>
+  );
+}
+
+
+/* ============================================================
+   ATA — RIESGO DINÁMICO POSOPERATORIO (Dynamic Risk Stratification)
+   Reconstrucción a partir de fuentes publicadas sobre ATA 2015/2016
+   (Momesso et al.) y la actualización ATA 2025 — ver disclaimer.
+   ============================================================ */
+function clasificarRiesgoDinamico(f) {
+  const tg = parseFloat(f.tg);
+  const tieneTg = !isNaN(tg);
+
+  // 1. Imagen estructural manda por sobre todo
+  if (f.imagen === "estructural") {
+    return {
+      categoria: "estructural",
+      label: "Respuesta estructural incompleta",
+      color: "#A2483A",
+      riesgo: "Persistencia/progresión documentada",
+      tsh: "Suprimido (< 0.1 mUI/L), salvo contraindicación",
+      detalle: "Enfermedad estructural identificada en imágenes — reevaluar conducta terapéutica activa (cirugía, RAI, terapia sistémica según extensión) con el equipo tratante.",
+    };
+  }
+
+  // 2. Imagen no específica → indeterminada, salvo marcadores muy alterados
+  if (f.imagen === "noespecifico") {
+    return {
+      categoria: "indeterminada",
+      label: "Respuesta indeterminada",
+      color: "#B4841F",
+      riesgo: "~15–20% de progresión a enfermedad estructural",
+      tsh: "Bajo-normal, con seguimiento más cercano",
+      detalle: "Hallazgo de imagen no específico (no claramente benigno ni maligno) — reevaluar con imagen dirigida o seguimiento en 6–12 meses.",
+    };
+  }
+
+  // 3. Imagen negativa → depende de Tg / TgAb / alcance quirúrgico
+  const tgAbSubiendo = f.tgAb === "subiendo";
+  const tgAbFavorable = f.tgAb === "negativo" || f.tgAb === "estable" || f.tgAb === "caida";
+
+  if (f.alcance === "lobectomia") {
+    const favorable = (f.tendenciaTg === "estable" || f.tendenciaTg === "caida") && !tgAbSubiendo;
+    if (favorable) {
+      return {
+        categoria: "excelente",
+        label: "Respuesta favorable",
+        color: "#3F7D6E",
+        riesgo: "Bajo",
+        tsh: "Rango normal",
+        detalle: "Tras lobectomía no se espera Tg indetectable (queda tejido tiroideo remanente) — se evalúa por tendencia, no por valor absoluto. Tendencia estable o en descenso, sin ascenso de TgAb.",
+      };
+    }
+    return {
+      categoria: "bioquimica",
+      label: "Respuesta bioquímica incompleta (equivalente)",
+      color: "#B4841F",
+      riesgo: "Intermedio — requiere seguimiento más cercano",
+      tsh: "Bajo-normal",
+      detalle: "Tendencia ascendente de Tg y/o TgAb tras lobectomía — considerar imagen dirigida y reevaluar en intervalo corto.",
+    };
+  }
+
+  // Total con o sin RAI
+  const umbral = f.alcance === "totalConRAI" ? (f.estadoTg === "suprimido" ? 0.2 : 1) : 2.5;
+  const tgFavorable = tieneTg ? tg <= umbral : true;
+
+  if (tgFavorable && tgAbFavorable) {
+    return {
+      categoria: "excelente",
+      label: "Respuesta excelente",
+      color: "#3F7D6E",
+      riesgo: "< 1–4% de recurrencia estructural",
+      tsh: "Puede relajarse hacia rango normal (o normal-bajo si el riesgo inicial era alto)",
+      detalle: `Tg ${f.alcance === "totalConRAI" ? "por debajo del umbral post-ablación" : "por debajo de 2.5 ng/mL (umbral ATA 2025 sin ablación)"}, TgAb favorable, imagen negativa.`,
+    };
+  }
+
+  return {
+    categoria: "bioquimica",
+    label: "Respuesta bioquímica incompleta",
+    color: "#B4841F",
+    riesgo: "~15–20% progresa a enfermedad estructural con el tiempo",
+    tsh: "Suprimido-bajo mientras persista la alteración bioquímica",
+    detalle: "Tg por encima del umbral esperado y/o TgAb en ascenso, con imagen negativa — intensificar seguimiento bioquímico e imagenológico.",
+  };
+}
+
+function RiesgoDinamicoCalculadora() {
+  const [f, setF] = useState({
+    alcance: "totalConRAI",
+    tg: "",
+    estadoTg: "suprimido",
+    tendenciaTg: "estable",
+    tgAb: "negativo",
+    imagen: "negativo",
+  });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const r = useMemo(() => clasificarRiesgoDinamico(f), [f]);
+
+  return (
+    <div>
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "16px" }}>
+        <div className="eyebrow" style={{ marginBottom: "16px" }}>Datos de seguimiento posoperatorio</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }} className="grid-cols-resp">
+          <Field label="Alcance de la cirugía">
+            <select value={f.alcance} onChange={set("alcance")} style={selectStyle}>
+              <option value="totalConRAI">Tiroidectomía total + yodo radioactivo</option>
+              <option value="totalSinRAI">Tiroidectomía total (sin yodo radioactivo)</option>
+              <option value="lobectomia">Lobectomía / hemitiroidectomía</option>
+            </select>
+          </Field>
+          {f.alcance !== "lobectomia" && (
+            <>
+              <Field label="Tg sérica (ng/mL)">
+                <input type="number" step="0.01" placeholder="ej: 0.15" value={f.tg} onChange={set("tg")} style={inputStyle} />
+              </Field>
+              <Field label="Estado de la Tg">
+                <select value={f.estadoTg} onChange={set("estadoTg")} style={selectStyle}>
+                  <option value="suprimido">Suprimido (bajo LT4)</option>
+                  <option value="estimulado">Estimulado (rhTSH o suspensión hormonal)</option>
+                </select>
+              </Field>
+            </>
+          )}
+          {f.alcance === "lobectomia" && (
+            <Field label="Tendencia de la Tg">
+              <select value={f.tendenciaTg} onChange={set("tendenciaTg")} style={selectStyle}>
+                <option value="estable">Estable</option>
+                <option value="caida">En descenso</option>
+                <option value="subiendo">En ascenso</option>
+              </select>
+            </Field>
+          )}
+          <Field label="Anticuerpos anti-Tg (TgAb)">
+            <select value={f.tgAb} onChange={set("tgAb")} style={selectStyle}>
+              <option value="negativo">Negativo</option>
+              <option value="estable">Positivo, estable</option>
+              <option value="caida">Positivo, en descenso</option>
+              <option value="subiendo">Positivo, en ascenso</option>
+            </select>
+          </Field>
+          <Field label="Resultado de imágenes (ecografía/TC/RAI)">
+            <select value={f.imagen} onChange={set("imagen")} style={selectStyle}>
+              <option value="negativo">Negativo</option>
+              <option value="noespecifico">No específico</option>
+              <option value="estructural">Estructural (enfermedad identificada)</option>
+            </select>
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "26px 24px", marginBottom: "16px", textAlign: "center" }}>
+        <div className="eyebrow" style={{ marginBottom: "10px" }}>Categoría de respuesta</div>
+        <div className="num" style={{ fontSize: "26px", fontWeight: 700, color: r.color }}>{r.label}</div>
+        <div style={{ marginTop: "8px" }}>
+          <span className="num" style={{ fontSize: "12px", fontWeight: 700, color: r.color, background: r.color + "1A", borderRadius: "5px", padding: "3px 10px" }}>
+            {r.riesgo}
+          </span>
+        </div>
+        <div style={{ fontSize: "13px", color: "#3A423E", maxWidth: "460px", margin: "12px auto 0", lineHeight: 1.5 }}>{r.detalle}</div>
+        <div style={{ marginTop: "14px", paddingTop: "14px", borderTop: "1px solid #F0EEE6" }}>
+          <span className="eyebrow">Nivel objetivo de TSH sugerido</span>
+          <div style={{ fontSize: "13.5px", fontWeight: 600, color: "#1C2321", marginTop: "4px" }}>{r.tsh}</div>
+        </div>
+      </div>
+
+      <a
+        href="https://tiro.expert/es/ata-2025-risk-of-recurrence-calculator/"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display: "block",
+          textAlign: "center",
+          background: "#1C2321",
+          color: "#F5F4F0",
+          borderRadius: "10px",
+          padding: "13px",
+          fontWeight: 600,
+          fontSize: "14px",
+          textDecoration: "none",
+          marginBottom: "16px",
+        }}
+      >
+        Contrastar con la calculadora oficial de TIRO ↗
+      </a>
+
+      <Disclaimer texto="La estratificación de riesgo dinámico integra la respuesta al tratamiento (Tg, TgAb, imágenes) con el riesgo inicial para reclasificar el pronóstico durante el seguimiento — es más predictiva que el riesgo inicial aislado. Esta reconstrucción usa los umbrales generales descritos en fuentes publicadas sobre ATA 2015/2016 y la actualización 2025 (incluyendo el nuevo umbral de Tg de 2.5 ng/mL en pacientes sin ablación); no es el motor exacto de TIRO. Objetivo de TSH sugerido: orientativo, siempre debe ajustarse según el riesgo inicial completo del paciente y la respuesta dinámica combinada, no solo esta única evaluación." />
+    </div>
+  );
+}
+
+
 function NoduloTab() {
   const [modo, setModo] = useState("tirads");
-
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
@@ -1942,18 +2459,505 @@ function NoduloTab() {
         </div>
       </div>
       <p style={{ color: "#4A544E", fontSize: "13.5px", marginBottom: "18px", maxWidth: "600px", lineHeight: 1.5 }}>
-        Dos sistemas de estratificación ecográfica en uso simultáneo — elegí el que use el informe
-        radiológico que tenés delante.
+        Estratificación ecográfica prequirúrgica (malignidad) y estratificación posquirúrgica
+        (recurrencia) — elegí según la etapa clínica en la que estés.
       </p>
 
       <div className="chips-scroll" style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
         <div className={`chip ${modo === "tirads" ? "active" : ""}`} onClick={() => setModo("tirads")}>ACR TI-RADS (2017)</div>
         <div className={`chip ${modo === "ata" ? "active" : ""}`} onClick={() => setModo("ata")}>Patrones ATA (2015)</div>
+        <div className={`chip ${modo === "ata2025" ? "active" : ""}`} onClick={() => setModo("ata2025")}>Riesgo de recurrencia — ATA 2025</div>
+        <div className={`chip ${modo === "dinamico" ? "active" : ""}`} onClick={() => setModo("dinamico")}>Riesgo dinámico (posoperatorio)</div>
       </div>
 
-      {modo === "tirads" ? <TiradsCalculadora /> : <AtaCalculadora />}
+      {modo === "tirads" && <TiradsCalculadora />}
+      {modo === "ata" && <AtaCalculadora />}
+      {modo === "ata2025" && <Ata2025Calculadora />}
+      {modo === "dinamico" && <RiesgoDinamicoCalculadora />}
 
-      <Disclaimer texto="TI-RADS y ATA son sistemas de estratificación ecográfica concordantes en la mayoría de los casos, pero no idénticos — usá el que corresponda al informe que tenés, y priorizá siempre la descripción del operador que realizó la ecografía por sobre esta herramienta. Ninguno de los dos sistemas diagnostica malignidad: solo estratifican el riesgo para decidir si está indicada la PAAF. El resultado citológico (sistema Bethesda) sigue siendo el paso siguiente para la conducta definitiva." />
+      {(modo === "tirads" || modo === "ata") && (
+        <Disclaimer texto="TI-RADS y ATA son sistemas de estratificación ecográfica concordantes en la mayoría de los casos, pero no idénticos — usá el que corresponda al informe que tenés, y priorizá siempre la descripción del operador que realizó la ecografía por sobre esta herramienta. Ninguno de los dos sistemas diagnostica malignidad: solo estratifican el riesgo para decidir si está indicada la PAAF. El resultado citológico (sistema Bethesda) sigue siendo el paso siguiente para la conducta definitiva." />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   MÓDULO 10 — FUNCIÓN RENAL: CKD-EPI 2021 Y COCKCROFT-GAULT
+   ============================================================ */
+function calcularCKDEPI(sexo, edad, creatinina) {
+  const scr = parseFloat(creatinina);
+  const age = parseFloat(edad);
+  if (!scr || !age || scr <= 0 || age <= 0) return null;
+
+  let egfr;
+  if (sexo === "mujer") {
+    const k = 0.7;
+    const alpha = scr <= k ? -0.241 : -1.200;
+    egfr = 142 * Math.pow(scr / k, alpha) * Math.pow(0.9938, age) * 1.012;
+  } else {
+    const k = 0.9;
+    const alpha = scr <= k ? -0.302 : -1.200;
+    egfr = 142 * Math.pow(scr / k, alpha) * Math.pow(0.9938, age);
+  }
+  return egfr;
+}
+
+function categoriaCKD(egfr) {
+  if (egfr >= 90) return { nivel: "G1", label: "Normal o alto", color: "#3F7D6E" };
+  if (egfr >= 60) return { nivel: "G2", label: "Levemente disminuido", color: "#3F7D6E" };
+  if (egfr >= 45) return { nivel: "G3a", label: "Leve a moderadamente disminuido", color: "#B4841F" };
+  if (egfr >= 30) return { nivel: "G3b", label: "Moderada a severamente disminuido", color: "#B4841F" };
+  if (egfr >= 15) return { nivel: "G4", label: "Severamente disminuido", color: "#A2483A" };
+  return { nivel: "G5", label: "Falla renal", color: "#A2483A" };
+}
+
+function calcularCockcroftGault(sexo, edad, peso, creatinina) {
+  const scr = parseFloat(creatinina);
+  const age = parseFloat(edad);
+  const w = parseFloat(peso);
+  if (!scr || !age || !w || scr <= 0 || age <= 0 || w <= 0) return null;
+  let crcl = ((140 - age) * w) / (72 * scr);
+  if (sexo === "mujer") crcl *= 0.85;
+  return crcl;
+}
+
+function RenalTab() {
+  const [sexo, setSexo] = useState("mujer");
+  const [edad, setEdad] = useState(55);
+  const [peso, setPeso] = useState(70);
+  const [creatinina, setCreatinina] = useState(0.9);
+
+  const egfr = useMemo(() => calcularCKDEPI(sexo, edad, creatinina), [sexo, edad, creatinina]);
+  const crcl = useMemo(() => calcularCockcroftGault(sexo, edad, peso, creatinina), [sexo, edad, peso, creatinina]);
+  const cat = egfr != null ? categoriaCKD(egfr) : null;
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+        <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#4A6FA5" }} />
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: "19px" }}>
+          Función renal
+        </div>
+      </div>
+      <p style={{ color: "#4A544E", fontSize: "13.5px", marginBottom: "18px", maxWidth: "620px", lineHeight: 1.5 }}>
+        <strong>Aclaración terminológica:</strong> CKD-EPI estima la <em>tasa de filtrado glomerular</em> (eGFR),
+        no el clearance de creatinina propiamente dicho — es la fórmula recomendada actualmente para
+        estadificar función renal. Si necesitás el clearance de creatinina clásico (por ejemplo, para
+        ajuste de dosis de algunos fármacos), usá Cockcroft-Gault, que también incluyo abajo.
+      </p>
+
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", marginBottom: "20px" }}>
+        <div className="eyebrow" style={{ marginBottom: "16px" }}>Datos del paciente</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }} className="grid-cols-resp">
+          <Field label="Sexo biológico">
+            <select value={sexo} onChange={(e) => setSexo(e.target.value)} style={selectStyle}>
+              <option value="mujer">Mujer</option>
+              <option value="hombre">Hombre</option>
+            </select>
+          </Field>
+          <Field label="Edad (años)">
+            <input type="number" value={edad} onChange={(e) => setEdad(e.target.value)} style={inputStyle} />
+          </Field>
+          <Field label="Peso (kg) — solo para Cockcroft-Gault">
+            <input type="number" value={peso} onChange={(e) => setPeso(e.target.value)} style={inputStyle} />
+          </Field>
+          <Field label="Creatinina sérica (mg/dL)">
+            <input type="number" step="0.01" value={creatinina} onChange={(e) => setCreatinina(e.target.value)} style={inputStyle} />
+          </Field>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }} className="grid-cols-resp">
+        <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", textAlign: "center" }}>
+          <div className="eyebrow" style={{ marginBottom: "10px" }}>CKD-EPI 2021 (eGFR)</div>
+          <div className="num" style={{ fontSize: "34px", fontWeight: 700, color: cat ? cat.color : "#1C2321" }}>
+            {egfr != null ? egfr.toFixed(0) : "—"}
+          </div>
+          <div style={{ fontSize: "12px", color: "#6B7A72" }}>mL/min/1.73m²</div>
+          {cat && (
+            <div style={{ marginTop: "10px" }}>
+              <span style={{ fontSize: "12px", fontWeight: 700, color: cat.color, background: cat.color + "1A", borderRadius: "5px", padding: "3px 10px" }}>
+                {cat.nivel} — {cat.label}
+              </span>
+            </div>
+          )}
+        </div>
+        <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "24px", textAlign: "center" }}>
+          <div className="eyebrow" style={{ marginBottom: "10px" }}>Cockcroft-Gault (CrCl)</div>
+          <div className="num" style={{ fontSize: "34px", fontWeight: 700, color: "#1C2321" }}>
+            {crcl != null ? crcl.toFixed(0) : "—"}
+          </div>
+          <div style={{ fontSize: "12px", color: "#6B7A72" }}>mL/min</div>
+          <div style={{ fontSize: "11px", color: "#8A9089", marginTop: "10px" }}>
+            Usa peso corporal real — considerar peso ideal/ajustado en obesidad
+          </div>
+        </div>
+      </div>
+
+      {/* Tabla de estadios KDIGO */}
+      <div style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderRadius: "14px", padding: "22px 24px", marginBottom: "20px" }}>
+        <div className="eyebrow" style={{ marginBottom: "14px" }}>Estadios de enfermedad renal crónica (KDIGO)</div>
+        {[
+          { nivel: "G1", rango: "≥ 90", label: "Normal o alto", color: "#3F7D6E" },
+          { nivel: "G2", rango: "60 – 89", label: "Levemente disminuido", color: "#3F7D6E" },
+          { nivel: "G3a", rango: "45 – 59", label: "Leve a moderadamente disminuido", color: "#B4841F" },
+          { nivel: "G3b", rango: "30 – 44", label: "Moderada a severamente disminuido", color: "#B4841F" },
+          { nivel: "G4", rango: "15 – 29", label: "Severamente disminuido", color: "#A2483A" },
+          { nivel: "G5", rango: "< 15", label: "Falla renal", color: "#A2483A" },
+        ].map((r, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "0.6fr 0.8fr 2fr", gap: "12px", padding: "9px 0", borderBottom: i < 5 ? "1px solid #F0EEE6" : "none", alignItems: "center" }}>
+            <span style={{ fontSize: "11px", fontWeight: 700, color: r.color, background: r.color + "1A", borderRadius: "4px", padding: "2px 8px", width: "fit-content" }}>{r.nivel}</span>
+            <div className="num" style={{ fontSize: "13px", fontWeight: 600 }}>{r.rango} mL/min/1.73m²</div>
+            <div style={{ fontSize: "12.5px", color: "#4A544E" }}>{r.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <Disclaimer texto="CKD-EPI 2021 (ecuación basada en creatinina, sin variable de raza) es la fórmula recomendada actualmente por KDIGO para estimar la tasa de filtrado glomerular en la práctica clínica general. Cockcroft-Gault sigue usándose en algunos protocolos de ajuste de dosis de fármacos por su validación histórica, pero tiende a sobreestimar el clearance en personas con obesidad si se usa el peso real sin ajustar. Ambas fórmulas requieren una creatinina en estado estable (no válidas en injuria renal aguda). Confirmar con la función renal medida (clearance con orina de 24 h) ante discrepancias clínicas relevantes." />
+    </div>
+  );
+}
+
+/* ============================================================
+   MÓDULO 11 — INTERACCIONES FARMACOLÓGICAS Y AJUSTES RENAL/HEPÁTICO
+   ============================================================ */
+const FARMACOS_CATEGORIAS = [
+  {
+    id: "antidiabeticos",
+    nombre: "Antidiabéticos orales e inyectables",
+    color: "#4A6FA5",
+    items: [
+      {
+        farmaco: "Metformina",
+        renal: "eGFR 45–59: sin restricción. eGFR 30–44: reducir dosis (máx. ~1000 mg/día) y monitorear más seguido. eGFR < 30: contraindicada.",
+        hepatica: "Evitar en insuficiencia hepática significativa — riesgo de acidosis láctica.",
+        interacciones: "Suspender transitoriamente con contraste yodado IV si eGFR < 60. Alcohol potencia el riesgo de acidosis láctica. Cimetidina aumenta sus niveles plasmáticos.",
+        adversos: "Diarrea, náuseas, sabor metálico (frecuentes, dependientes de dosis). Déficit de vitamina B12 con uso crónico. Acidosis láctica (rara, pero grave).",
+      },
+      {
+        farmaco: "Glibenclamida",
+        renal: "Evitar si eGFR < 60 — sus metabolitos activos se acumulan, alto riesgo de hipoglucemia prolongada.",
+        hepatica: "Evitar en insuficiencia hepática.",
+        interacciones: "Potencia hipoglucemia con warfarina, fluoroquinolonas, sulfonamidas, alcohol, azoles y fibratos.",
+        adversos: "Hipoglucemia (la más frecuente y prolongada de las sulfonilureas), aumento de peso.",
+      },
+      {
+        farmaco: "Glimepirida / Gliclazida",
+        renal: "Usar con precaución, iniciar con dosis bajas si hay deterioro renal; gliclazida es algo más segura que glibenclamida en este contexto.",
+        hepatica: "Evitar en insuficiencia hepática severa.",
+        interacciones: "Similares a glibenclamida — potencian hipoglucemia con alcohol, azoles, fibratos.",
+        adversos: "Hipoglucemia (menos prolongada que glibenclamida), aumento de peso.",
+      },
+      {
+        farmaco: "Empagliflozina",
+        renal: "10 mg/día, se puede subir a 25 mg/día. No iniciar con eGFR < 20. Dentro del rango permitido, no requiere ajuste de dosis (misma dosis independientemente del eGFR).",
+        hepatica: "Sin ajuste en insuficiencia leve, moderada ni severa (datos limitados en severa — usar con precaución).",
+        interacciones: "Potencia hipoglucemia si se combina con insulina o sulfonilureas. Diuréticos aumentan el riesgo de depleción de volumen/hipotensión.",
+        adversos: "Infecciones micóticas genitales, ITU, poliuria, depleción de volumen/hipotensión, cetoacidosis euglucémica (rara pero grave — sospechar aunque la glucemia sea normal).",
+      },
+      {
+        farmaco: "Dapagliflozina",
+        renal: "10 mg/día (dosis única, sin escalado). No iniciar con eGFR < 25 para indicación glucémica; puede continuarse con eGFR más bajo para indicación renal/cardíaca específica según ficha técnica.",
+        hepatica: "Sin ajuste en insuficiencia leve-moderada. En severa, considerar dosis inicial menor y monitorear.",
+        interacciones: "Igual que empagliflozina — potencia hipoglucemia con insulina/sulfonilureas; diuréticos aumentan riesgo de depleción de volumen.",
+        adversos: "Igual que empagliflozina: infecciones micóticas genitales, ITU, depleción de volumen, cetoacidosis euglucémica (rara).",
+      },
+      {
+        farmaco: "Canagliflozina",
+        renal: "100 mg/día inicial, se puede subir a 300 mg/día si eGFR ≥ 60. Con eGFR 30–59: máximo 100 mg/día (no escalar a 300). No iniciar con eGFR < 30.",
+        hepatica: "Sin ajuste en insuficiencia leve-moderada. No recomendada en insuficiencia hepática severa (datos limitados).",
+        interacciones: "Igual que el resto de la clase — potencia hipoglucemia con insulina/sulfonilureas; diuréticos aumentan riesgo de hipotensión.",
+        adversos: "Además de los efectos de clase (micóticas genitales, ITU, depleción de volumen, cetoacidosis euglucémica): señal específica de mayor riesgo de amputación de miembros inferiores y de fractura — tener en cuenta en pacientes con enfermedad vascular periférica u osteoporosis.",
+      },
+      {
+        farmaco: "Liraglutida / Semaglutida / Dulaglutida (GLP-1)",
+        renal: "Sin ajuste de dosis necesario en la mayoría de los grados de deterioro renal.",
+        hepatica: "Sin ajuste mayor descrito; datos limitados en insuficiencia hepática severa.",
+        interacciones: "El retraso del vaciamiento gástrico puede alterar la absorción de otros fármacos orales tomados simultáneamente.",
+        adversos: "Náuseas, vómitos y diarrea (frecuentes, sobre todo al inicio o al escalar dosis). Pancreatitis (rara). Contraindicados si antecedente personal/familiar de carcinoma medular de tiroides o MEN2 (señal en modelos animales).",
+      },
+      {
+        farmaco: "Exenatida",
+        renal: "Evitar si eGFR < 30 (a diferencia de otros GLP-1, sí tiene eliminación renal relevante).",
+        hepatica: "Sin ajuste mayor descrito.",
+        interacciones: "Igual que otros GLP-1 — puede alterar absorción de fármacos orales por enlentecimiento del vaciamiento gástrico.",
+        adversos: "Náuseas, vómitos, diarrea; pancreatitis (rara); reacciones en el sitio de inyección más frecuentes que con otros GLP-1.",
+      },
+      {
+        farmaco: "Sitagliptina",
+        renal: "100 mg/día con eGFR ≥ 60. eGFR 45–59: 50 mg/día. eGFR < 45 (incluye diálisis): 25 mg/día.",
+        hepatica: "Sin ajuste en insuficiencia leve-moderada (Child-Pugh A/B); sin datos suficientes en severa.",
+        interacciones: "Pocas interacciones mayores; potencia hipoglucemia si se combina con sulfonilureas o insulina.",
+        adversos: "Nasofaringitis, cefalea. Pancreatitis (rara). Artralgia severa (descrita como efecto de clase). Penfigoide ampolloso (raro).",
+      },
+      {
+        farmaco: "Vildagliptina",
+        renal: "50 mg cada 12 h (100 mg/día) con eGFR ≥ 50. Con eGFR < 50 (incluye diálisis): 50 mg una vez al día.",
+        hepatica: "No recomendada en ningún grado de insuficiencia hepática, incluida la leve — riesgo de hepatotoxicidad; controlar transaminasas antes de iniciar y periódicamente durante el primer año.",
+        interacciones: "Pocas interacciones mayores; potencia hipoglucemia con sulfonilureas.",
+        adversos: "Nasofaringitis, mareos. Elevación de transaminasas/hepatotoxicidad (la vigilancia hepática es más estricta que en otros iDPP4). Angioedema (poco frecuente).",
+      },
+      {
+        farmaco: "Saxagliptina",
+        renal: "5 mg/día con eGFR > 45. Con eGFR ≤ 45 (incluye diálisis): 2.5 mg/día.",
+        hepatica: "Sin ajuste en insuficiencia leve-moderada; usar con precaución en severa (datos limitados).",
+        interacciones: "Pocas interacciones mayores; potencia hipoglucemia con sulfonilureas.",
+        adversos: "Nasofaringitis, cefalea. Señal de mayor riesgo de hospitalización por insuficiencia cardíaca (estudio SAVOR-TIMI) — precaución en pacientes con IC.",
+      },
+      {
+        farmaco: "Linagliptina",
+        renal: "5 mg/día — no requiere ajuste en ningún grado de insuficiencia renal (eliminación predominantemente biliar/entérica, no renal).",
+        hepatica: "Sin ajuste mayor en ningún grado de insuficiencia hepática.",
+        interacciones: "Pocas interacciones relevantes; potencia hipoglucemia con sulfonilureas.",
+        adversos: "Nasofaringitis, tos. Pancreatitis (rara). Es el iDPP4 de elección cuando hay deterioro renal/hepático significativo, precisamente por no requerir ajuste.",
+      },
+      {
+        farmaco: "Pioglitazona",
+        renal: "Sin ajuste mayor por función renal.",
+        hepatica: "Contraindicada en enfermedad hepática activa — monitorear transaminasas periódicamente.",
+        interacciones: "Contraindicada en insuficiencia cardíaca (retención de líquidos). Gemfibrozilo aumenta sus niveles plasmáticos.",
+        adversos: "Retención de líquidos/edema, aumento de peso, mayor riesgo de fracturas (sobre todo en mujeres), posible asociación con cáncer de vejiga (controvertida), puede precipitar insuficiencia cardíaca.",
+      },
+      {
+        farmaco: "Insulina (todas las formas)",
+        renal: "Reducir dosis con eGFR < 30–45 — menor clearance y degradación renal de insulina, mayor riesgo de hipoglucemia.",
+        hepatica: "Reducir dosis en insuficiencia hepática significativa — menor gluconeogénesis hepática.",
+        interacciones: "Alcohol, salicilatos e IECA potencian la hipoglucemia. Corticoides y diuréticos tiazídicos aumentan el requerimiento de insulina.",
+        adversos: "Hipoglucemia (el más frecuente y relevante), aumento de peso, lipodistrofia en los sitios de inyección con uso prolongado sin rotación.",
+      },
+    ],
+  },
+  {
+    id: "tiroideos",
+    nombre: "Tiroideos",
+    color: "#3F7D6E",
+    items: [
+      {
+        farmaco: "Levotiroxina",
+        renal: "Sin ajuste de dosis por función renal en general.",
+        hepatica: "Sin ajuste mayor, aunque la enfermedad hepática puede alterar las proteínas transportadoras de hormona tiroidea.",
+        interacciones: "Absorción reducida por calcio, hierro, IBP, sucralfato y colestiramina — separar la toma por ≥ 4 h. Metabolismo aumentado por rifampicina, fenitoína y carbamazepina (puede requerir aumentar la dosis).",
+        adversos: "Los del sobrereemplazo: palpitaciones, insomnio, temblor, pérdida de peso; con exceso mantenido en el tiempo, mayor riesgo de fibrilación auricular y pérdida de masa ósea.",
+      },
+      {
+        farmaco: "Metimazol",
+        renal: "Sin ajuste mayor por función renal.",
+        hepatica: "Usar dosis bajas y monitorear en insuficiencia hepática — hepatotoxicidad colestásica infrecuente pero descrita.",
+        interacciones: "Potencia el efecto anticoagulante de warfarina.",
+        adversos: "Rash, prurito. Agranulocitosis (rara pero grave — advertir al paciente que consulte de inmediato ante fiebre u odinofagia). Hepatotoxicidad colestásica. Vasculitis ANCA-positiva (rara).",
+      },
+      {
+        farmaco: "Propiltiouracilo",
+        renal: "Sin ajuste mayor por función renal.",
+        hepatica: "Evitar — riesgo de hepatotoxicidad grave (incluye alerta de caja negra); reservar para primer trimestre de embarazo o intolerancia a metimazol.",
+        interacciones: "Similar a metimazol — potencia el efecto de warfarina.",
+        adversos: "Hepatotoxicidad grave, incluida falla hepática fulminante (el riesgo más relevante de este fármaco). Agranulocitosis. Vasculitis ANCA-positiva.",
+      },
+    ],
+  },
+  {
+    id: "corticoides",
+    nombre: "Corticoides",
+    color: "#A2483A",
+    items: [
+      {
+        farmaco: "Prednisona / Metilprednisolona",
+        renal: "Sin ajuste mayor por función renal.",
+        hepatica: "En insuficiencia hepática severa, la prednisona (profármaco) tiene conversión hepática reducida a prednisolona — preferir prednisolona directamente.",
+        interacciones: "Rifampicina, fenitoína y carbamazepina reducen su efecto (inducción CYP3A4). Azoles, macrólidos e inhibidores de proteasa aumentan su efecto. AINEs aumentan el riesgo de sangrado digestivo. Diuréticos potencian la hipopotasemia.",
+        adversos: "Hiperglucemia, hipertensión, osteoporosis, insuficiencia suprarrenal si se suspende abruptamente tras uso prolongado, aumento de peso, cambios de humor, mayor riesgo de infecciones, cataratas y glaucoma con uso crónico.",
+      },
+      {
+        farmaco: "Hidrocortisona",
+        renal: "Sin ajuste mayor por función renal.",
+        hepatica: "No requiere conversión hepática (es la forma activa) — preferible en insuficiencia hepática severa sobre prednisona.",
+        interacciones: "Similares a otros corticoides — inductores/inhibidores de CYP3A4, AINEs, diuréticos.",
+        adversos: "Similares a prednisona, aunque con menor potencia relativa por dosis — igualmente relevante en dosis suprafisiológicas prolongadas.",
+      },
+    ],
+  },
+  {
+    id: "oseos",
+    nombre: "Osteoporosis",
+    color: "#6B5B95",
+    items: [
+      {
+        farmaco: "Bifosfonatos orales (alendronato, risedronato)",
+        renal: "Contraindicados si eGFR < 30–35 (varía según el agente).",
+        hepatica: "Sin ajuste — no tienen metabolismo hepático significativo.",
+        interacciones: "Absorción muy reducida por calcio, hierro, antiácidos y alimentos — tomar en ayunas, separar 30–60 min de cualquier ingesta.",
+        adversos: "Esofagitis/pirosis (mantener posición erguida 30 min tras la toma). Osteonecrosis de mandíbula (rara). Fractura atípica de fémur (con uso prolongado, > 5 años).",
+      },
+      {
+        farmaco: "Ácido zoledrónico (IV)",
+        renal: "Contraindicado si eGFR < 35. Ajustar tiempo de infusión y controlar función renal antes de cada dosis.",
+        hepatica: "Sin ajuste mayor.",
+        interacciones: "Aminoglucósidos aumentan el riesgo de hipocalcemia.",
+        adversos: "Síndrome pseudogripal post-infusión (frecuente en la primera dosis, autolimitado). Hipocalcemia. Osteonecrosis de mandíbula (rara). Deterioro agudo de función renal (raro, más frecuente si hay deshidratación previa).",
+      },
+      {
+        farmaco: "Denosumab",
+        renal: "Puede usarse en ERC avanzada (no depende de excreción renal), pero con mayor riesgo de hipocalcemia severa cuando el eGFR es muy bajo — monitorear calcemia de cerca.",
+        hepatica: "Sin ajuste descrito.",
+        interacciones: "Pocas interacciones mayores; asegurar siempre suplementación de calcio y vitamina D concomitante.",
+        adversos: "Hipocalcemia (más marcada que con bifosfonatos, especialmente en ERC). Riesgo de fracturas vertebrales múltiples por rebote si se suspende sin terapia de transición. Osteonecrosis de mandíbula e infecciones cutáneas (raras).",
+      },
+      {
+        farmaco: "Teriparatida / Abaloparatida",
+        renal: "Evitar en insuficiencia renal severa.",
+        hepatica: "Sin ajuste mayor descrito.",
+        interacciones: "Pocas interacciones mayores relevantes.",
+        adversos: "Hipercalcemia leve transitoria, mareos, calambres en piernas. Riesgo teórico de osteosarcoma (visto en ratas a dosis altas, no confirmado en humanos — por eso el uso se limita a 2 años).",
+      },
+    ],
+  },
+  {
+    id: "hipofisosuprarrenal",
+    nombre: "Hipofisarios y suprarrenales",
+    color: "#8B5A8C",
+    items: [
+      {
+        farmaco: "Análogos de somatostatina (octreotide, lanreotide)",
+        renal: "Reducir la dosis de mantenimiento en insuficiencia renal severa — el clearance de octreotide se reduce significativamente.",
+        hepatica: "Reducir dosis en cirrosis — octreotide tiene metabolismo hepático relevante, ajustar según respuesta.",
+        interacciones: "Puede alterar la absorción de ciclosporina (reducir su nivel) y afectar el control glucémico en pacientes con insulina/hipoglucemiantes (requiere ajuste). Bradicardizantes (betabloqueantes) potencian la bradicardia.",
+        adversos: "Síntomas gastrointestinales (dolor abdominal, diarrea, esteatorrea) — muy frecuentes al inicio. Colelitiasis con uso prolongado (mayor riesgo, controlar con ecografía periódica). Alteración del control glucémico (hiperglucemia más frecuente que hipoglucemia). Bradicardia. Dolor en el sitio de inyección con las formulaciones de depósito.",
+      },
+      {
+        farmaco: "Pasireotide",
+        renal: "Sin ajuste mayor establecido; usar con precaución en insuficiencia renal severa (datos limitados).",
+        hepatica: "Reducir dosis en insuficiencia hepática moderada; evitar en severa.",
+        interacciones: "Igual que otros análogos de somatostatina — atención especial con fármacos que prolongan el QT (pasireotide también lo prolonga).",
+        adversos: "Hiperglucemia marcada (más frecuente e intensa que con octreotide/lanreotide — inhibe más la secreción de incretinas; requiere monitoreo glucémico estrecho desde el inicio). Además, los efectos de clase: GI, colelitiasis, bradicardia. Prolongación del intervalo QT.",
+      },
+      {
+        farmaco: "Cabergolina",
+        renal: "Sin ajuste mayor establecido (datos limitados en insuficiencia renal).",
+        hepatica: "Usar con precaución en insuficiencia hepática severa — tiene metabolismo hepático; considerar reducir dosis.",
+        interacciones: "Evitar con antipsicóticos y otros antagonistas dopaminérgicos (reducen su eficacia). Antihipertensivos potencian la hipotensión ortostática.",
+        adversos: "Náuseas, mareos, hipotensión ortostática (sobre todo al iniciar o escalar dosis — titular lentamente). Fibrosis valvular cardíaca con dosis altas y uso prolongado (más descrito en dosis de Parkinson; en dosis bajas de prolactinoma se recomienda igual ecocardiograma si la dosis acumulada es alta). Trastornos del control de impulsos (raro, efecto de clase de los agonistas dopaminérgicos). Somnolencia.",
+      },
+      {
+        farmaco: "Metirapona",
+        renal: "Sin ajustes estandarizados publicados; usar con monitoreo estrecho de cortisol y electrolitos independientemente de la función renal.",
+        hepatica: "Usar con precaución y monitoreo estrecho en insuficiencia hepática — tiene metabolismo hepático relevante.",
+        interacciones: "Fenitoína acelera su metabolismo y puede reducir su eficacia.",
+        adversos: "Náuseas, vértigo, cefalea. Hirsutismo y acné (por acumulación de precursores androgénicos, 11-desoxicortisol y andrógenos suprarrenales). Hipertensión, edema e hipopotasemia (por acumulación de precursores mineralocorticoides, 11-desoxicorticosterona). Insuficiencia suprarrenal si se sobre-suprime la síntesis de cortisol — requiere monitoreo clínico y bioquímico frecuente.",
+      },
+      {
+        farmaco: "Fluconazol (uso off-label como inhibidor de esteroidogénesis, dosis altas)",
+        renal: "Sí requiere ajuste — tiene eliminación renal significativa. Dosis de carga completa, luego reducir aproximadamente 50% si eGFR 21–50, y 25% si eGFR ≤ 20 o diálisis.",
+        hepatica: "Usar con precaución y monitorear transaminasas periódicamente; no hay reducción de dosis estandarizada pero sí vigilancia estrecha recomendada.",
+        interacciones: "Inhibidor potente de CYP2C9 y CYP3A4 — aumenta niveles de warfarina, sulfonilureas (riesgo de hipoglucemia), estatinas (riesgo de miopatía), fenitoína y ciclosporina. Prolonga el intervalo QT, con riesgo aumentado si se combina con otros fármacos QT-prolongantes.",
+        adversos: "Hepatotoxicidad (elevación de transaminasas — el efecto más relevante a vigilar en este uso). Náuseas, cefalea. Prolongación del QT (riesgo de arritmias). Rash.",
+      },
+    ],
+  },
+  {
+    id: "otros",
+    nombre: "Otros relevantes en endocrinología",
+    color: "#B4841F",
+    items: [
+      {
+        farmaco: "Estatinas (atorvastatina, simvastatina)",
+        renal: "Sin ajuste mayor en la mayoría de los grados de deterioro; algunas requieren reducción en ERC avanzada (ej. rosuvastatina).",
+        hepatica: "Contraindicadas en enfermedad hepática activa — monitorear transaminasas.",
+        interacciones: "Azoles, macrólidos, inhibidores de proteasa y pomelo aumentan el riesgo de miopatía/rabdomiólisis (vía CYP3A4). Fibratos —especialmente gemfibrozilo— aumentan ese mismo riesgo.",
+        adversos: "Mialgia/miopatía (la más frecuente en la práctica). Elevación de transaminasas. Rabdomiólisis (rara pero grave). Aumento leve del riesgo de desarrollar diabetes.",
+      },
+      {
+        farmaco: "Espironolactona (SOP / hirsutismo)",
+        renal: "Evitar o usar con mucha precaución en ERC avanzada — riesgo de hiperpotasemia; contraindicada con eGFR muy bajo.",
+        hepatica: "Sin ajuste mayor descrito.",
+        interacciones: "IECA, ARA2 y AINEs aumentan el riesgo de hiperpotasemia. Potencia niveles de digoxina.",
+        adversos: "Hiperpotasemia (el más relevante a vigilar). Ginecomastia y mastalgia por efecto antiandrogénico. Irregularidades menstruales.",
+      },
+    ],
+  },
+];
+
+function InteraccionesTab() {
+  const [busqueda, setBusqueda] = useState("");
+  const [catActiva, setCatActiva] = useState("todos");
+
+  const filtradas = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    return FARMACOS_CATEGORIAS.map((cat) => ({
+      ...cat,
+      items: cat.items.filter((it) => {
+        const matchCat = catActiva === "todos" || cat.id === catActiva;
+        const matchQuery = q === "" || it.farmaco.toLowerCase().includes(q);
+        return matchCat && matchQuery;
+      }),
+    })).filter((cat) => cat.items.length > 0);
+  }, [busqueda, catActiva]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+        <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#B4841F" }} />
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: "19px" }}>
+          Interacciones y ajustes renal/hepático
+        </div>
+      </div>
+      <p style={{ color: "#4A544E", fontSize: "13.5px", marginBottom: "18px", maxWidth: "620px", lineHeight: 1.5 }}>
+        Fármacos de uso frecuente en endocrinología y diabetes — ajuste por función renal, ajuste por
+        función hepática, e interacciones clave a tener en cuenta.
+      </p>
+
+      <input
+        type="text"
+        placeholder="Buscar fármaco (ej: metformina, levotiroxina, estatinas...)"
+        value={busqueda}
+        onChange={(e) => setBusqueda(e.target.value)}
+        style={{ width: "100%", padding: "13px 16px", borderRadius: "10px", border: "1px solid #D8D5CB", background: "#FFFFFF", fontSize: "14.5px", marginBottom: "16px", outline: "none" }}
+      />
+
+      <div className="chips-scroll" style={{ display: "flex", gap: "8px", overflowX: "auto", marginBottom: "24px", paddingBottom: "2px" }}>
+        <div className={`chip ${catActiva === "todos" ? "active" : ""}`} onClick={() => setCatActiva("todos")}>Todas las categorías</div>
+        {FARMACOS_CATEGORIAS.map((cat) => (
+          <div key={cat.id} className={`chip ${catActiva === cat.id ? "active" : ""}`} onClick={() => setCatActiva(cat.id)}>{cat.nombre}</div>
+        ))}
+      </div>
+
+      {filtradas.length === 0 && <div style={{ color: "#6B7A72", fontSize: "14px", padding: "24px 0" }}>No se encontraron fármacos para "{busqueda}".</div>}
+
+      {filtradas.map((cat) => (
+        <div key={cat.id} style={{ marginBottom: "24px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+            <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: cat.color }} />
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: "15.5px" }}>{cat.nombre}</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {cat.items.map((it, i) => (
+              <div key={i} style={{ background: "#FFFFFF", border: "1px solid #E4E1D6", borderLeft: `4px solid ${cat.color}`, borderRadius: "12px", padding: "16px 20px" }}>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: "14.5px", marginBottom: "10px" }}>{it.farmaco}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <div>
+                    <span className="eyebrow" style={{ color: "#4A6FA5" }}>Ajuste renal</span>
+                    <div style={{ fontSize: "13px", color: "#3A423E", lineHeight: 1.5, marginTop: "2px" }}>{it.renal}</div>
+                  </div>
+                  <div>
+                    <span className="eyebrow" style={{ color: "#A2483A" }}>Ajuste hepático</span>
+                    <div style={{ fontSize: "13px", color: "#3A423E", lineHeight: 1.5, marginTop: "2px" }}>{it.hepatica}</div>
+                  </div>
+                  <div>
+                    <span className="eyebrow" style={{ color: "#B4841F" }}>Interacciones clave</span>
+                    <div style={{ fontSize: "13px", color: "#3A423E", lineHeight: 1.5, marginTop: "2px" }}>{it.interacciones}</div>
+                  </div>
+                  <div>
+                    <span className="eyebrow" style={{ color: "#6B5B95" }}>Efectos adversos principales</span>
+                    <div style={{ fontSize: "13px", color: "#3A423E", lineHeight: 1.5, marginTop: "2px" }}>{it.adversos}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <Disclaimer texto="Esta tabla resume interacciones y ajustes frecuentes de uso práctico diario; no reemplaza la consulta a una fuente farmacológica completa (ej. UpToDate Lexicomp, Vademécum) ante casos complejos, polifarmacia significativa, o pacientes con múltiples comorbilidades. Los puntos de corte de eGFR para ajuste de dosis pueden variar levemente según el prospecto/ficha técnica local — confirmar siempre contra la información del fabricante vigente en Argentina antes de prescribir." />
     </div>
   );
 }
@@ -1981,9 +2985,11 @@ const TABS = [
   { id: "referencia", label: "Valores de referencia" },
   { id: "conversor", label: "Conversor de unidades" },
   { id: "algoritmos", label: "Algoritmos terapéuticos" },
+  { id: "renal", label: "Función renal (CKD-EPI)" },
+  { id: "interacciones", label: "Interacciones y ajustes" },
 ];
 
-function App() {
+export default function App() {
   const [tab, setTab] = useState("corticoides");
 
   return (
@@ -2016,13 +3022,9 @@ function App() {
         {tab === "masld" && <MasldTab />}
         {tab === "obesidad" && <ObesidadTab />}
         {tab === "nodulo" && <NoduloTab />}
+        {tab === "renal" && <RenalTab />}
+        {tab === "interacciones" && <InteraccionesTab />}
       </div>
     </div>
   );
 }
-
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
-</script>
-</body>
-</html>
